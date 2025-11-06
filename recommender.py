@@ -1,40 +1,54 @@
 import pandas as pd
+import requests
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import linear_kernel
+from sklearn.metrics.pairwise import cosine_similarity
 
-# Load Data
-df = pd.read_csv("movies.csv")
-df['genres'] = df['genres'].fillna('')
-df['content'] = df['title'].str.lower() + " " + df['genres'].str.replace('|', ' ')
+TMDB_API_KEY = "945e4d253cca3f197069d2694ee26a9b"   # ← paste your TMDB v3 API key here
 
-# Create TF-IDF matrix
-vectorizer = TfidfVectorizer(stop_words='english')
-tfidf_matrix = vectorizer.fit_transform(df['content'])
+movies = pd.read_csv("movies.csv")
+movies["combined"] = movies["title"] + " " + movies["genres"]
 
-# Compute cosine similarity
-cosine_sim = linear_kernel(tfidf_matrix, tfidf_matrix)
+vectorizer = TfidfVectorizer(stop_words="english")
+vectors = vectorizer.fit_transform(movies["combined"])
+similarity = cosine_similarity(vectors)
 
-def recommend(movie_title, top_n=5):
-    movie_title = movie_title.lower()
-    if movie_title not in df['title'].str.lower().values:
-        print("Movie not found! Please try again.\n")
-        return
-    
-    idx = df[df['title'].str.lower() == movie_title].index[0]
-    sim_scores = list(enumerate(cosine_sim[idx]))
-    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)[1:top_n+1]
-    
-    print("\nTop Recommendations:")
-    for i, (movie_index, score) in enumerate(sim_scores, start=1):
-        print(f"{i}. {df.loc[movie_index, 'title']}  —  {df.loc[movie_index, 'genres']}")
-    print()
+def get_description(movie_title):
+    try:
+        url = f"https://api.themoviedb.org/3/search/movie?api_key={TMDB_API_KEY}&query={movie_title}"
+        r = requests.get(url, timeout=5).json()
+
+        if r.get("results"):
+            movie_id = r["results"][0]["id"]
+            details_url = f"https://api.themoviedb.org/3/movie/{movie_id}?api_key={TMDB_API_KEY}"
+            details = requests.get(details_url, timeout=5).json()
+            return details.get("overview", "No description available.")
+
+        return "No description available."
+
+    except:
+        return "Description not available (API rate limit). Try again later."
+
+def recommend(movie_name):
+    idx = movies[movies["title"] == movie_name].index[0]
+    distances = list(enumerate(similarity[idx]))
+    sorted_movies = sorted(distances, key=lambda x: x[1], reverse=True)[1:6]
+    return [movies.iloc[i[0]].title for i in sorted_movies]
 
 print("🎬 Movie Recommender System Ready!")
-print("Type a movie name exactly from the list, e.g., Toy Story (1995)")
 print("Type 'exit' to quit.\n")
 
 while True:
     movie = input("Enter movie title: ")
     if movie.lower() == "exit":
         break
-    recommend(movie)
+
+    if movie not in movies["title"].values:
+        print("Movie not found. Try again.\n")
+        continue
+
+    recs = recommend(movie)
+    print("\nRecommended Movies:\n")
+    for m in recs:
+        print("•", m)
+
+    print("\nMovie Description:\n", get_description(movie), "\n")
